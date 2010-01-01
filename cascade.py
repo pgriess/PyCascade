@@ -184,6 +184,11 @@ def oauth_get_access_token(oaConsumer, oaReqToken):
         if accTokenResp:
             accTokenResp.close()
 
+def oauth_refresh_access_token(oaConsumer, oaAccToken):
+    '''Refresh the given OAuth access token. Returns a new access token.'''
+
+    return oauth_get_access_token(oaConsumer, oaAccToken)
+
 ################################################################################
 # Unit tests
 ################################################################################

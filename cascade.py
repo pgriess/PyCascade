@@ -186,16 +186,6 @@ def oauth_get_access_token(oaConsumer, oaReqToken):
 
 ################################################################################
 # Unit tests
-#
-# TODO: Notes on configuring unittests (including 404 workaround).
-#
-# To run these tests through an HTTP proxy, take advantage of the built-in
-# support for proxies in urllib2. Set 'http_proxy' and 'https_proxy'
-# environment variables before invocation like so:
-#
-#   % export http_proxy='http://localhost:8888'
-#   % export https_proxy='http://localhost:8888'
-#   % python cascade.py
 ################################################################################
 
 def generate_unittest_settings():

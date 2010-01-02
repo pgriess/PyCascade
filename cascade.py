@@ -205,38 +205,46 @@ def generate_unittest_settings():
     sys.stdout.write('consumer secret: ')
     consumerSecret = sys.stdin.readline().strip()
 
-    sys.stdout.write('application url: ')
-    appUrl = sys.stdin.readline().strip()
+    sys.stdout.write('consumer callback URL: ')
+    consumerCbUrl = sys.stdin.readline().strip()
 
     oaConsumer = oauth.OAuthConsumer(consumerKey, consumerSecret)
 
-    reqTok, url = oauth_get_request_token(oaConsumer, appUrl)
+    reqTok, url = oauth_get_request_token(oaConsumer, consumerCbUrl)
 
-    print '>>> nagivate to the following URL in your browser'
+    print '''>>> navigate to the following URL in your browser, then paste
+in token callback URL that results'''
     print url
 
-    sys.stdout.write('callback URL: ')
-    cbUrl = sys.stdin.readline().strip()
+    sys.stdout.write('token callback URL: ')
+    tokenCbUrl = sys.stdin.readline().strip()
 
-    cbUrlQp = urlparse.urlsplit(cbUrl).query
-    cbUrlDict = cgi.parse_qs(cbUrlQp)
+    tokenCbUrlQp = urlparse.urlsplit(tokenCbUrl).query
+    tokenCbUrlDict = cgi.parse_qs(tokenCbUrlQp)
 
-    assert(cbUrlDict['oauth_token'][0] == reqTok.key)
-    reqTok.set_verifier(cbUrlDict['oauth_verifier'][0])
+    assert(tokenCbUrlDict['oauth_token'][0] == reqTok.key)
+    reqTok.set_verifier(tokenCbUrlDict['oauth_verifier'][0])
+
+    accTok = oauth_get_access_token(oaConsumer, reqTok)
 
     f = open('cascade_unittest_settings.py', 'w')
     f.write(
 """OAUTH_CONSUMER_KEY = '%s'
 OAUTH_CONSUMER_SECRET = '%s'
 OAUTH_REQUEST_TOKEN_JSON = '%s'
-""" % (consumerKey, consumerSecret, simplejson.dumps({ 'key' : reqTok.key, 'secret' : reqTok.secret, 'verifier' : reqTok.verifier}))
+OAUTH_ACCESS_TOKEN_JSON = '%s'
+""" % \
+        (
+            consumerKey,
+            consumerSecret,
+            simplejson.dumps({ 'key' : reqTok.key, 'secret' : reqTok.secret, 'verifier' : reqTok.verifier}),
+            simplejson.dumps({ 'key' : accTok.key, 'secret' : accTok.secret, 'verifier' : accTok.verifier})
+        )
     )
     f.close()
 
 class OAuthBaseTest(unittest.TestCase):
     '''Base class for tests, loading OAuth credentials.'''
-
-    _setupAccessToken = True
 
     def setUp(self):
         # Create OAuth objects (a consumer, a request token, and access
@@ -253,11 +261,12 @@ class OAuthBaseTest(unittest.TestCase):
         )
         self._oaRequestToken.set_verifier(reqTokJSON['verifier'])
 
-        if self._setupAccessToken:
-            self._oaAccessToken = oauth_get_access_token(
-                self._oaConsumer,
-                self._oaRequestToken
-            )
+        accTokJSON = simplejson.loads(cascade_unittest_settings.OAUTH_ACCESS_TOKEN_JSON)
+        self._oaAccessToken = oauth.OAuthToken(
+            accTokJSON['key'],
+            accTokJSON['secret']
+        )
+        self._oaAccessToken.set_verifier(accTokJSON['verifier'])
 
 class OAuthTest(OAuthBaseTest):
     '''Verify that OAuth access works at all.'''
@@ -274,26 +283,8 @@ class OAuthTest(OAuthBaseTest):
         except CascadeHTTPError, e:
             self.assertEquals(401, e.getHTTPStatus())
 
-    def testAccessToken(self):
-        '''Verify that we can acquire and use an access token from our
-           request token.'''
-
-        accTok = oauth_get_access_token(
-            self._oaConsumer,
-            self._oaRequestToken
-        )
-
-        self.assert_(accTok)
-
-        jc = JSON11Client(self._oaConsumer, accTok)
-        result = jc.call('ListFolders', [{}])
-
-        self.assert_(result)
-
 class JSON11ClientTest(OAuthBaseTest):
     '''Verify that JSON11Client functions as expected.'''
-
-    _setupAccessToken = True
 
     def setUp(self):
         OAuthBaseTest.setUp(self)

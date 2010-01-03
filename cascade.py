@@ -4,6 +4,7 @@ import cgi
 import oauth
 import simplejson
 import sys
+import time
 import unittest
 import urllib
 import urllib2
@@ -23,30 +24,34 @@ OAUTH2_ENDPOINT_URL = 'https://api.login.yahoo.com/oauth/v2'
 class CascadeError(Exception):
     '''An exception class for Cascade errors.'''
 
-class CascadeJSONError(CascadeError):
-    '''An exception class for Cascade JSON errors. Wraps the 'error'
-       element in JSON responses.'''
+    def __init__(self, msg = ''):
+        Exception.__init__(self, msg)
 
-    def __init__(self, error):
-        self.__error = error
+class CascadeHTTPError(CascadeError):
+    '''An exception class for serve-generated Cascade errors.'''
+
+    def __init__(self, httpResponse):
+        self.__httpResponse = httpResponse
+        self.__jsonError = None
+
+        if httpResponse.headers.type == 'application/json':
+            jo = simplejson.loads(''.join(httpResponse.readlines()))
+            self.__jsonError = jo['error']
 
     def getJSONError(self):
-        '''Get the JSON error structure that came with this response.'''
+        '''Get a Python object representing the JSON error blob. Only valid if
+           the Content-Type of the response is application/json; otherwise,
+           returns None.'''
 
         return self.__error
 
-class CascadeHTTPError(CascadeError):
-    '''An exception class for Cascade HTTP errors. Represents any non-200
-       response that comes back from the Cascade server.'''
+    def getHTTPStatus(self):
+        '''Get the HTTP status code from the response.'''
 
-    def __init__(self, httpError):
-        self.__httpError = httpError
+        return self.__httpResponse.code
 
     def __str__(self):
-        return '%s: %d' % (self.__httpError.filename, self.__httpError.code)
-
-    def getHTTPStatus(self):
-        return self.__httpError.code
+        return '%s: %d %s' % (self.__httpResponse.url, self.__httpResponse.code, self.__httpResponse.msg)
 
 ################################################################################
 # Cascade client classes
@@ -67,7 +72,7 @@ class JSON11Client:
         '''Call the given method using the specified parameters (which are
            passed directly as the 'params' value in the JSON payload).
            Returns a result object derived from un-serializing the response
-           JSON data. Raises a CascadeError if problems arise.'''
+           JSON data. Raises a CascadeHTTPError if problems arise.'''
 
         oaReq = oauth.OAuthRequest(
             http_method = 'POST',
@@ -85,25 +90,43 @@ class JSON11Client:
         headers = { 'Content-Type' : 'application/json' }
         headers.update(oaReq.to_header())
 
-        cascadeResp = None
-        try:
-            cascadeReq = urllib2.Request(
-                url = JSON11_ENDPOINT_URL,
-                data = simplejson.dumps({
-                    'method' : method,
-                    'params' : params,
-                }),
-                headers = headers
-            )
+        for attemptNo in range(0, 2):
+            cascadeResp = None
+            try:
+                cascadeReq = urllib2.Request(
+                    url = JSON11_ENDPOINT_URL,
+                    data = simplejson.dumps({
+                        'method' : method,
+                        'params' : params,
+                    }),
+                    headers = headers
+                )
 
-            cascadeResp = urllib2.urlopen(cascadeReq)
+                cascadeResp = urllib2.urlopen(cascadeReq)
 
-            return simplejson.loads(''.join(cascadeResp.readlines()))
-        except urllib2.HTTPError, e:
-            raise CascadeHTTPError(e)
-        finally:
-            if cascadeResp:
-                cascadeResp.close()
+                return simplejson.loads(''.join(cascadeResp.readlines()))
+            except urllib2.HTTPError, e:
+                # If we see something other than a 401 on our first attempt
+                # to make the call, give up. Otherwise, attempt to refresh
+                # our access token and try again.
+                #
+                # XXX: I can't get this to work with the Yahoo! OAuth
+                #      provider at this point. For some reason, the refresh
+                #      works but using the new token yields the same error
+                #      (999).
+                if True or attemptNo > 0 or e.code != 401:
+                    raise CascadeHTTPError(e)
+
+                self.__oaToken = oauth_refresh_access_token(
+                    self.__oaConsumer,
+                    self.__oaToken
+                )
+            finally:
+                if cascadeResp:
+                    cascadeResp.close()
+
+        # We should never get here.
+        assert(False)
 
 ################################################################################
 # OAuth utility functions
@@ -150,24 +173,40 @@ def oauth_get_request_token(oaConsumer, url):
             reqTokenResp.close()
 
 def oauth_get_access_token(oaConsumer, oaReqToken):
-    '''Get an OAuth access token from the given request token. Returns an
-       oauth.OAuthToken.'''
-
-    assert(oaReqToken.verifier)
+    '''Get an OAuth access token from the given token (either request or
+       access). Returns an oauth.OAuthToken, possibly  with some extra
+       instance variables set to reflect presence of OAuth extension
+       attributes in the response (e.g.  session handle, expiration time,
+       etc). Can be called with an access token to attempt a refresh (which
+       still returns a new token).'''
 
     oaSig = oauth.OAuthSignatureMethod_HMAC_SHA1()
+
+    oaReqParams = {
+        'oauth_nonce' : oauth.generate_nonce(),
+        'oauth_timestamp' : oauth.generate_timestamp(),
+        'oauth_consumer_key' : oaConsumer.key,
+        'oauth_token' : oaReqToken.key,
+        'oauth_version' : '1.0',
+    }
+
+    # If our token has a session handle, add it to our parmeter dictionary.
+    # This should only be the case if we're requesting a new access token
+    # (i.e. not doing a token refresh, as access tokens do not have a
+    # verifier).
+    if 'verifier' in oaReqToken.__dict__:
+        oaReqParams['oauth_verifier'] = oaReqToken.verifier
+
+    # If our token has a session handle, add it to our parmeter dictionary.
+    # This should only be the case if we're doing a token refresh from an
+    # access token.
+    if 'session_handle' in oaReqToken.__dict__:
+        oaReqParams['oauth_session_handle'] = oaReqToken.session_handle
 
     oaReq = oauth.OAuthRequest(
         http_method = 'GET',
         http_url = OAUTH2_ENDPOINT_URL + '/get_token',
-        parameters = {
-            'oauth_nonce' : oauth.generate_nonce(),
-            'oauth_timestamp' : oauth.generate_timestamp(),
-            'oauth_consumer_key' : oaConsumer.key,
-            'oauth_verifier' : oaReqToken.verifier,
-            'oauth_token' : oaReqToken.key,
-            'oauth_version' : '1.0',
-        }
+        parameters = oaReqParams
     )
 
     oaReq.sign_request(oaSig, oaConsumer, oaReqToken)
@@ -177,7 +216,29 @@ def oauth_get_access_token(oaConsumer, oaReqToken):
         accTokenResp = urllib2.urlopen(oaReq.to_url())
         accTokenRespContent = ''.join(accTokenResp.readlines())
 
-        return oauth.OAuthToken.from_string(accTokenRespContent)
+        accTok = oauth.OAuthToken.from_string(accTokenRespContent)
+
+        # Look for any extra query parameters that provide data from OAuth
+        # extensions that we might care about. Specifically, make sure to
+        # grab the session handle so that we can refresh the access token.
+        accTokParams = cgi.parse_qs(
+            accTokenRespContent,
+            keep_blank_values = False
+        )
+        if 'oauth_expires_in' in accTokParams:
+            accTok.expires_on = \
+                int(time.time()) + \
+                int(accTokParams['oauth_expires_in'][0])
+        if 'oauth_session_handle' in accTokParams:
+            accTok.session_handle = accTokParams['oauth_session_handle'][0]
+        if 'oauth_authorization_expires_in' in accTokParams:
+            accTok.authorization_expires_on = \
+                int(time.time()) + \
+                int(accTokParams['oauth_authorization_expires_in'][0])
+        if 'xoauth_yahoo_guid' in accTokParams:
+            accTok.yahoo_guid = accTokParams['xoauth_yahoo_guid'][0]
+
+        return accTok
     except urllib2.HTTPError, e:
         raise CascadeHTTPError(e)
     finally:
@@ -187,13 +248,63 @@ def oauth_get_access_token(oaConsumer, oaReqToken):
 def oauth_refresh_access_token(oaConsumer, oaAccToken):
     '''Refresh the given OAuth access token. Returns a new access token.'''
 
+    if not 'session_handle' in oaAccToken.__dict__:
+        raise CascadeError(
+            'Cannot refresh access token without a session handle.'
+        )
+
     return oauth_get_access_token(oaConsumer, oaAccToken)
 
 ################################################################################
 # Unit tests
 ################################################################################
 
-def generate_unittest_settings():
+def _oauth_token_to_query_string(tok):
+    '''Serialize an OAuth token to a query string. This string should be
+       compatible with oauth.OAuthToken.from_string().'''
+
+    data = {
+        'oauth_token': tok.key,
+        'oauth_token_secret': tok.secret,
+    }
+
+    if tok.callback_confirmed is not None:
+        data['oauth_callback_confirmed'] = tok.callback_confirmed
+    if 'verifier' in tok.__dict__:
+        data['oauth_verifier'] = tok.verifier
+    if 'expires_on' in tok.__dict__:
+        data['xoauth_expires_on'] = tok.expires_on
+    if 'session_handle' in tok.__dict__:
+        data['oauth_session_handle'] = tok.session_handle
+    if 'authorization_expires_on' in tok.__dict__:
+        data['xoauth_authorization_expires_on'] = tok.authorization_expires_on
+    if 'yahoo_guid' in tok.__dict__:
+        data['xoauth_yahoo_guid'] = tok.yahoo_guid
+
+    return urllib.urlencode(data)
+
+def _oauth_token_from_query_string(s):
+    '''De-serialize an OAuth token from a query string. The query string
+       could be generated by __oauth_token_to_query_string(), or via
+       oauth.OAuthToken.to_string().'''
+
+    tok = oauth.OAuthToken.from_string(s)
+    params = cgi.parse_qs(s, keep_blank_values = False)
+
+    if 'oauth_verifier' in params:
+        tok.verifier = params['oauth_verifier'][0]
+    if 'xoauth_expires_on' in params:
+        tok.expires_on = int(params['xoauth_expires_on'][0])
+    if 'oauth_session_handle' in params:
+        tok.session_handle = params['oauth_session_handle'][0]
+    if 'xoauth_authorization_expires_on' in params:
+        tok.authorization_expires_on = int(params['xoauth_authorization_expires_on'][0])
+    if 'xoauth_yahoo_guid' in params:
+        tok.yahoo_guid = params['xoauth_yahoo_guid'][0]
+
+    return tok
+
+def _generate_unittest_settings():
     '''Generate a cascade_unittest_settings.py module in the current
        directory.'''
 
@@ -231,14 +342,14 @@ in token callback URL that results'''
     f.write(
 """OAUTH_CONSUMER_KEY = '%s'
 OAUTH_CONSUMER_SECRET = '%s'
-OAUTH_REQUEST_TOKEN_JSON = '%s'
-OAUTH_ACCESS_TOKEN_JSON = '%s'
+OAUTH_REQUEST_TOKEN = '%s'
+OAUTH_ACCESS_TOKEN = '%s'
 """ % \
         (
             consumerKey,
             consumerSecret,
-            simplejson.dumps({ 'key' : reqTok.key, 'secret' : reqTok.secret, 'verifier' : reqTok.verifier}),
-            simplejson.dumps({ 'key' : accTok.key, 'secret' : accTok.secret, 'verifier' : accTok.verifier})
+            _oauth_token_to_query_string(reqTok),
+            _oauth_token_to_query_string(accTok),
         )
     )
     f.close()
@@ -254,26 +365,14 @@ class OAuthBaseTest(unittest.TestCase):
             cascade_unittest_settings.OAUTH_CONSUMER_SECRET
         )
 
-        reqTokJSON = simplejson.loads(cascade_unittest_settings.OAUTH_REQUEST_TOKEN_JSON)
-        self._oaRequestToken = oauth.OAuthToken(
-            reqTokJSON['key'],
-            reqTokJSON['secret']
-        )
-        self._oaRequestToken.set_verifier(reqTokJSON['verifier'])
-
-        accTokJSON = simplejson.loads(cascade_unittest_settings.OAUTH_ACCESS_TOKEN_JSON)
-        self._oaAccessToken = oauth.OAuthToken(
-            accTokJSON['key'],
-            accTokJSON['secret']
-        )
-        self._oaAccessToken.set_verifier(accTokJSON['verifier'])
+        self._oaRequestToken = _oauth_token_from_query_string(cascade_unittest_settings.OAUTH_REQUEST_TOKEN)
+        self._oaAccessToken = _oauth_token_from_query_string(cascade_unittest_settings.OAUTH_ACCESS_TOKEN)
 
 class OAuthTest(OAuthBaseTest):
     '''Verify that OAuth access works at all.'''
 
     def testBadRequestToken(self):
-        '''Verify that attempting to use a broken request token fails
-           with a 401 HTTP status.'''
+        '''Verify that attempting to use a broken request token fails with a 401 HTTP status.'''
 
         oaBadRequestToken = oauth.OAuthToken('qqqq', 'vvvvv')
         oaBadRequestToken.set_verifier('zipf')
@@ -291,9 +390,13 @@ class JSON11ClientTest(OAuthBaseTest):
 
         self.__client = JSON11Client(self._oaConsumer, self._oaAccessToken)
 
+    def testBasicRequest(self):
+        '''Verify that a simple Cascade request works as expected.'''
+
+        self.__client.call('ListFolders', [{}])
+
     def testHTTPError(self):
-        '''Verify that a 500 HTTP results in a raised CascadeHTTPError with
-           appropriate details filled in.'''
+        '''Verify that a 500 HTTP results in a raised CascadeHTTPError with appropriate details filled in.'''
 
         try:
             # We happen to know that calling an undefined method results
@@ -310,7 +413,7 @@ if __name__ == '__main__':
     try:
         import cascade_unittest_settings
     except ImportError:
-        generate_unittest_settings()
+        _generate_unittest_settings()
 
         try:
             import cascade_unittest_settings

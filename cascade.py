@@ -68,6 +68,13 @@ class JSON11Client:
         self.__oaToken = oaToken
         self.__oaSig = oauth.OAuthSignatureMethod_HMAC_SHA1()
 
+    def getToken(self):
+        '''Get the OAuthToken for this client. A caller may wish to invoke
+           this, as the underlying token may have changed due to access
+           token refresh.'''
+
+        return self.__oaToken
+
     def call(self, method = '', params = [{}]):
         '''Call the given method using the specified parameters (which are
            passed directly as the 'params' value in the JSON payload).
@@ -306,6 +313,24 @@ def _oauth_token_from_query_string(s):
 
     return tok
 
+def _write_unittest_settings(consumerKey, consumerSecret, accTok):
+    '''Write a cascade_unittest_settings.py module in the currrent
+       directory, based on the provided paramters.'''
+
+    f = open('cascade_unittest_settings.py', 'w')
+    f.write(
+"""OAUTH_CONSUMER_KEY = '%s'
+OAUTH_CONSUMER_SECRET = '%s'
+OAUTH_ACCESS_TOKEN = '%s'
+""" % \
+        (
+            consumerKey,
+            consumerSecret,
+            _oauth_token_to_query_string(accTok),
+        )
+    )
+    f.close()
+
 def _generate_unittest_settings():
     '''Generate a cascade_unittest_settings.py module in the current
        directory.'''
@@ -325,6 +350,8 @@ def _generate_unittest_settings():
 
     reqTok, url = oauth_get_request_token(oaConsumer, consumerCbUrl)
 
+    _write_unittest_settings(consumerKey, consumerSecret, accTok)
+
     print '''>>> navigate to the following URL in your browser, then paste
 in token callback URL that results'''
     print url
@@ -340,22 +367,6 @@ in token callback URL that results'''
 
     accTok = oauth_get_access_token(oaConsumer, reqTok)
 
-    f = open('cascade_unittest_settings.py', 'w')
-    f.write(
-"""OAUTH_CONSUMER_KEY = '%s'
-OAUTH_CONSUMER_SECRET = '%s'
-OAUTH_REQUEST_TOKEN = '%s'
-OAUTH_ACCESS_TOKEN = '%s'
-""" % \
-        (
-            consumerKey,
-            consumerSecret,
-            _oauth_token_to_query_string(reqTok),
-            _oauth_token_to_query_string(accTok),
-        )
-    )
-    f.close()
-
 class OAuthBaseTest(unittest.TestCase):
     '''Base class for tests, loading OAuth credentials.'''
 
@@ -367,7 +378,6 @@ class OAuthBaseTest(unittest.TestCase):
             cascade_unittest_settings.OAUTH_CONSUMER_SECRET
         )
 
-        self._oaRequestToken = _oauth_token_from_query_string(cascade_unittest_settings.OAUTH_REQUEST_TOKEN)
         self._oaAccessToken = _oauth_token_from_query_string(cascade_unittest_settings.OAUTH_ACCESS_TOKEN)
 
 class OAuthTest(OAuthBaseTest):
@@ -391,6 +401,18 @@ class JSON11ClientTest(OAuthBaseTest):
         OAuthBaseTest.setUp(self)
 
         self.__client = JSON11Client(self._oaConsumer, self._oaAccessToken)
+
+    def tearDown(self):
+        # If our client has refreshed the access token, update the unittest
+        # settings module, both in-memory and on-disk.
+        if cascade_unittest_settings.OAUTH_ACCESS_TOKEN != \
+            _oauth_token_to_query_string(self.__client.getToken()):
+            cascade_unittest_settings.OAUTH_ACCESS_TOKEN = _oauth_token_to_query_string(self.__client.getToken())
+            _write_unittest_settings(
+                cascade_unittest_settings.OAUTH_CONSUMER_KEY,
+                cascade_unittest_settings.OAUTH_CONSUMER_SECRET,
+                self.__client.getToken()
+            )
 
     def testBasicRequest(self):
         '''Verify that a simple Cascade request works as expected.'''

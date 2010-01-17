@@ -74,23 +74,25 @@ class JSON11Client:
            Returns a result object derived from un-serializing the response
            JSON data. Raises a CascadeHTTPError if problems arise.'''
 
-        oaReq = oauth.OAuthRequest(
-            http_method = 'POST',
-            http_url = JSON11_ENDPOINT_URL,
-            parameters = {
-                'oauth_nonce' : oauth.generate_nonce(),
-                'oauth_timestamp' : oauth.generate_timestamp(),
-                'oauth_consumer_key' : self.__oaConsumer.key,
-                'oauth_token' : self.__oaToken.key,
-                'oauth_version' : '1.0'
-            }
-        )
-        oaReq.sign_request(self.__oaSig, self.__oaConsumer, self.__oaToken)
-
-        headers = { 'Content-Type' : 'application/json' }
-        headers.update(oaReq.to_header())
-
         for attemptNo in range(0, 2):
+            # Construct and sign the request within our retry loop so that
+            # we pick up any refresh of the access token
+            oaReq = oauth.OAuthRequest(
+                http_method = 'POST',
+                http_url = JSON11_ENDPOINT_URL,
+                parameters = {
+                    'oauth_nonce' : oauth.generate_nonce(),
+                    'oauth_timestamp' : oauth.generate_timestamp(),
+                    'oauth_consumer_key' : self.__oaConsumer.key,
+                    'oauth_token' : self.__oaToken.key,
+                    'oauth_version' : '1.0'
+                }
+            )
+            oaReq.sign_request(self.__oaSig, self.__oaConsumer, self.__oaToken)
+
+            headers = { 'Content-Type' : 'application/json' }
+            headers.update(oaReq.to_header(realm = 'yahooapis.com'))
+
             cascadeResp = None
             try:
                 cascadeReq = urllib2.Request(
@@ -114,7 +116,7 @@ class JSON11Client:
                 #      provider at this point. For some reason, the refresh
                 #      works but using the new token yields the same error
                 #      (999).
-                if True or attemptNo > 0 or e.code != 401:
+                if attemptNo > 0 or e.code != 999:
                     raise CascadeHTTPError(e)
 
                 self.__oaToken = oauth_refresh_access_token(

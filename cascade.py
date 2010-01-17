@@ -98,7 +98,7 @@ class JSON11Client:
             oaReq.sign_request(self.__oaSig, self.__oaConsumer, self.__oaToken)
 
             headers = { 'Content-Type' : 'application/json' }
-            headers.update(oaReq.to_header(realm = 'yahooapis.com'))
+            headers.update(oaReq.to_header())
 
             cascadeResp = None
             try:

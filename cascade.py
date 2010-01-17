@@ -350,8 +350,6 @@ def _generate_unittest_settings():
 
     reqTok, url = oauth_get_request_token(oaConsumer, consumerCbUrl)
 
-    _write_unittest_settings(consumerKey, consumerSecret, accTok)
-
     print '''>>> navigate to the following URL in your browser, then paste
 in token callback URL that results'''
     print url
@@ -366,6 +364,8 @@ in token callback URL that results'''
     reqTok.set_verifier(tokenCbUrlDict['oauth_verifier'][0])
 
     accTok = oauth_get_access_token(oaConsumer, reqTok)
+
+    _write_unittest_settings(consumerKey, consumerSecret, accTok)
 
 class OAuthBaseTest(unittest.TestCase):
     '''Base class for tests, loading OAuth credentials.'''

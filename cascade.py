@@ -328,7 +328,7 @@ OAUTH_ACCESS_TOKEN = '%s'
         (
             consumerKey,
             consumerSecret,
-            _oauth_token_to_query_string(accTok),
+            oauth_token_to_query_string(accTok),
         )
     )
     f.close()
@@ -380,7 +380,7 @@ class OAuthBaseTest(unittest.TestCase):
             cascade_unittest_settings.OAUTH_CONSUMER_SECRET
         )
 
-        self._oaAccessToken = _oauth_token_from_query_string(cascade_unittest_settings.OAUTH_ACCESS_TOKEN)
+        self._oaAccessToken = oauth_token_from_query_string(cascade_unittest_settings.OAUTH_ACCESS_TOKEN)
 
 class OAuthTest(OAuthBaseTest):
     '''Verify that OAuth access works at all.'''
@@ -408,8 +408,8 @@ class JSON11ClientTest(OAuthBaseTest):
         # If our client has refreshed the access token, update the unittest
         # settings module, both in-memory and on-disk.
         if cascade_unittest_settings.OAUTH_ACCESS_TOKEN != \
-            _oauth_token_to_query_string(self.__client.getToken()):
-            cascade_unittest_settings.OAUTH_ACCESS_TOKEN = _oauth_token_to_query_string(self.__client.getToken())
+            oauth_token_to_query_string(self.__client.getToken()):
+            cascade_unittest_settings.OAUTH_ACCESS_TOKEN = oauth_token_to_query_string(self.__client.getToken())
             _write_unittest_settings(
                 cascade_unittest_settings.OAUTH_CONSUMER_KEY,
                 cascade_unittest_settings.OAUTH_CONSUMER_SECRET,

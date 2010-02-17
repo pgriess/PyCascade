@@ -474,7 +474,9 @@ class JSON11ClientTest(OAuthBaseTest):
     def testBasicRequest(self):
         '''Verify that a simple Cascade request works as expected.'''
 
-        self.__client.call('ListFolders', [{}])
+        rslt = self.__client.call('ListFolders', [{}])
+
+        assert(int(rslt['result']['numberOfFolders']) > 0)
 
     def testHTTPError(self):
         '''Verify that a 500 HTTP results in a raised CascadeHTTPError with appropriate details filled in.'''

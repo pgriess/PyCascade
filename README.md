@@ -76,8 +76,8 @@ and retrieving the `OAUTH_ACCESS_TOKEN` value from
 As a brief example, we call `ListFolders`.
 
     % echo "[{}]" | python ./cascade.py call \
-        -k 'dj0yJmk9cWJhRFppU0c4VGh4JmQ9WVdrOVkzcEtNR3QwTXpnbWNHbzlOakkxTXprd05qZzEmcz1jb25zdW1lcnNlY3JldCZ4PTk2' \
-        -s '010bc87588e462415628780fde3c239bb58fcd59' \
+        -k 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX' \
+        -s 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX' \
         -a 'xoauth_yahoo_guid=UDLAKKVZB3N4BVS7CMIDBIDRYI&oauth_token_secret=3800c4b46be3eceb26938eb3af0198c031661c80&xoauth_authorization_expires_on=2147483650&oauth_session_handle=ANCIPkvlhRw8XL_VsZpCU88oUzYLm2f6cFCoS2.zF1x79QU-&oauth_token=A%3DiDHi8nvCpwQlBW6HqXB2eZywDxmGID3d28CX4ArOd7tF0YgHJCqDY0H39t6VeuobybSL8kVW1GCX0XedzVoPe2R8cl5Bw_uTsEHeKP.qnEMQz.qO9RWzdvFS.qzGIoaX3w.wLZUDAckrHOT2jSdDab72iXURTkuFaDjAdO.SIa6qJLRPQJuD_4fMgL4h1553y9uuz_revFBB8iqd8VQDWJKh1mr.p41ovaMDp90VR4Bpnap1xfQ7yNT.x9psZrtcS32MQcekaz.L3Ax6bKhBRc__JqeU5LIA0HONuM0yTk01vtb.Wcu0U7_jTRH3VAeyymKENhIlcsx3gUmJ0h5OzeAHvH16BEEl4SHS4nff2POJqZ7RSbrowkrWtoXYLCb5epjFoHXlk45c2xKbEpUyNYKGoLjrTLloTlfv90X6uRt3VctcsLEw8e5_kHUOfhcM7aUqMGRcZdihoC5ts6I0wxmVkGzGqSSdRIhYnZXcvB5dj9On9HtXBoQ.XF2kQT4zErW81i6dEgUu4i6hOq.Pey_qBLRVWno8ffyj.QRhUvhk2y2BrczKDHnnsLxXSOjVjFKo62IObXGjO7FelxOUeSc3tKn0N7Ic_AAxDQgo.X2v8mkoZKH66rHspH06vVURTLMG7oADaDsfZSe6CmnkrcOU7DN.AivzOV16Yu1wkXjSfABfSovE.QcRG6QB3fckypZ7PBfbRhOwboo_txK0a6A6WhMKA2EGnRBhCj68UEW7aLIEac2wJXWkErEhhcU2Z75.62KYjZlbAUyBUQ--&xoauth_expires_on=1266426257' \
         ListFolders
     {

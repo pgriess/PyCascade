@@ -1,7 +1,9 @@
 # A Python library for talking Cascade.
 
 import cgi
+import logging
 import oauth
+import pprint
 import simplejson
 import sys
 import time
@@ -9,6 +11,8 @@ import unittest
 import urllib
 import urllib2
 import urlparse
+
+from optparse import OptionParser
 
 ################################################################################
 # Constants 
@@ -75,39 +79,62 @@ class JSON11Client:
 
         return self.__oaToken
 
-    def call(self, method = '', params = [{}]):
+    def call(self, method, params = [{}], id = None, oauthDefaults = {}):
         '''Call the given method using the specified parameters (which are
            passed directly as the 'params' value in the JSON payload).
            Returns a result object derived from un-serializing the response
-           JSON data. Raises a CascadeHTTPError if problems arise.'''
+           JSON data. The optional 'id' value is the Cascade call ID, which
+           is not sent in the request if un-specified.
+
+           The 'oauthDefaults' dictionary can be used to specify default OAuth
+           parameter values. For example, one can use this to force a specific
+           nonce or timestamp value. Any parameters not specifed in this
+           dictionary fall back to their OAuth defaults (e.g. generate a new
+           nonce).
+           
+           Raises a CascadeHTTPError if problems arise.'''
+
+        # Populate OAuth parameters
+        oauthParameters = {
+            'oauth_nonce' : oauth.generate_nonce(),
+            'oauth_timestamp' : oauth.generate_timestamp(),
+            'oauth_consumer_key' : self.__oaConsumer.key,
+            'oauth_token' : self.__oaToken.key,
+            'oauth_version' : '1.0'
+        }
+        oauthParameters.update(oauthDefaults)
+
+        # Populate Cascade parameters
+        data = {
+            'method' : method,
+            'params' : params
+        }
+        if id:
+            data['id'] = id
+        data = simplejson.dumps(data)
 
         for attemptNo in range(0, 2):
+            logging.debug('Making request %d / 2' % (attemptNo + 1))
+
             # Construct and sign the request within our retry loop so that
             # we pick up any refresh of the access token
             oaReq = oauth.OAuthRequest(
                 http_method = 'POST',
                 http_url = JSON11_ENDPOINT_URL,
-                parameters = {
-                    'oauth_nonce' : oauth.generate_nonce(),
-                    'oauth_timestamp' : oauth.generate_timestamp(),
-                    'oauth_consumer_key' : self.__oaConsumer.key,
-                    'oauth_token' : self.__oaToken.key,
-                    'oauth_version' : '1.0'
-                }
+                parameters = oauthParameters
             )
             oaReq.sign_request(self.__oaSig, self.__oaConsumer, self.__oaToken)
 
             headers = { 'Content-Type' : 'application/json' }
             headers.update(oaReq.to_header())
 
+            logging.debug('HTTP headers: ' + pprint.pformat(headers))
+
             cascadeResp = None
             try:
                 cascadeReq = urllib2.Request(
                     url = JSON11_ENDPOINT_URL,
-                    data = simplejson.dumps({
-                        'method' : method,
-                        'params' : params,
-                    }),
+                    data = data,
                     headers = headers
                 )
 
@@ -115,6 +142,12 @@ class JSON11Client:
 
                 return simplejson.loads(''.join(cascadeResp.readlines()))
             except urllib2.HTTPError, e:
+                logging.info(
+                    'HTTP request failed: code=%d; message=\'%s\'' % (
+                        e.code, e.msg
+                    )
+                )
+
                 # If we see something other than a 401 on our first attempt
                 # to make the call, give up. Otherwise, attempt to refresh
                 # our access token and try again.
@@ -125,6 +158,8 @@ class JSON11Client:
                 #      (999).
                 if attemptNo > 0 or e.code != 999:
                     raise CascadeHTTPError(e)
+
+                logging.info('Refreshing OAuth access token ' + self.__oaToken.key)
 
                 self.__oaToken = oauth_refresh_access_token(
                     self.__oaConsumer,
@@ -373,6 +408,26 @@ class OAuthBaseTest(unittest.TestCase):
     '''Base class for tests, loading OAuth credentials.'''
 
     def setUp(self):
+        # XXX: This is funky. Because we're doing an import from within the
+        #      confines of this class method, unless we're careful, the import
+        #      of this module will get bound to a local variable. Instead, we
+        #      make sure that it gets bound to a global.
+        global cascade_unittest_settings
+
+        # Load up unittest settings, creating them if non-existant. These
+        # are stashed in cascade_unittest_settings.py and are loaded using
+        # the standard module path.
+        try:
+            import cascade_unittest_settings
+        except ImportError:
+            _generate_unittest_settings()
+
+            try:
+                import cascade_unittest_settings
+            except ImportError:
+                print sys.stderr, '>>> unable to configure settings; exiting'
+                sys.exit(1)
+
         # Create OAuth objects (a consumer, a request token, and access
         # token if requested) from unittest settings.
         self._oaConsumer = oauth.OAuthConsumer(
@@ -432,19 +487,192 @@ class JSON11ClientTest(OAuthBaseTest):
         except CascadeHTTPError, e:
             self.assertEquals(500, e.getHTTPStatus())
 
-if __name__ == '__main__':
-    # Load up unittest settings, creating them if non-existant. These
-    # are stashed in cascade_unittest_settings.py and are loaded using
-    # the standard module path.
+################################################################################
+# Main
+#
+# Parses just enough of the commandline to dispatch the subcommand. Parses
+# global options as part of this, stashing them in 'globalOpts'.
+################################################################################
+
+def cmd_call(argv):
+    '''Make a single Cascade call.'''
+
+    op = OptionParser(
+        usage = '''%prog call <method> [options]
+        
+Calls the Cascade method <method>. Parameters to the call should be passed on
+stdin as a JSON blob. The results of the call are written to stdout.'''
+    )
+    op.add_option(
+        '-i', '--id', dest = 'id', default = None,
+        help = '''id of the request; if unspecified, none will be sent'''
+    )
+    op.add_option(
+        '-k', '--oauth-consumer-key', dest = 'oauthConsumerKey', default = None,
+        help = '''the OAuth consumer key; required'''
+    )
+    op.add_option(
+        '-s', '--oauth-consumer-secret', dest = 'oauthConsumerSecret', default = None,
+        help = '''the OAuth consumer secret; required'''
+    )
+    op.add_option(
+        '-a', '--oauth-access-token', dest = 'oauthAccessToken', default = None,
+        help = '''the OAuth access token to use, in the form of a query string
+from oauth_token_to_query_string(); this is the preferred method of specifying
+an access token, over --oauth-access-token-* (default: %default)'''
+    )
+    op.add_option(
+        '--oauth-access-token-key', dest = 'oauthAccessTokenKey', default = None,
+        help = '''the OAuth access token key; required'''
+    )
+    op.add_option(
+        '--oauth-access-token-secret', dest = 'oauthAccessTokenSecret',
+        default = None,
+        help = '''the OAuth access token secret; required'''
+    )
+    op.add_option(
+        '--oauth-timestamp', dest = 'oauthTimestamp', type = 'int',
+        default = oauth.generate_timestamp(),
+        help = '''the timestamp to use for OAuth signing, in epoch seconds
+(default: %default)'''
+    )
+    op.add_option(
+        '--oauth-nonce', dest = 'oauthNonce', default = oauth.generate_nonce(),
+        help = '''the nonce to use for OAuth signing (default: %default)'''
+    )
+
+    opts, args = op.parse_args(argv)
+    PROG_NAME = op.get_prog_name()
+
+    # Get our method name and parameters
+    if len(args) != 1:
+        op.print_usage(sys.stderr)
+        sys.exit(1)
+
+    methodName = args[0]
+    methodParams = simplejson.loads(''.join(sys.stdin.readlines()))
+
+    # Create our OAuth consumer
+    if opts.oauthConsumerKey and \
+       opts.oauthConsumerSecret:
+        oaConsumer = oauth.OAuthConsumer(
+            opts.oauthConsumerKey,
+            opts.oauthConsumerSecret
+        )
+    else:
+        sys.stderr.write(
+            '\'%s\': consumer key options not specified\n' % (PROG_NAME)
+        )
+        op.print_usage(sys.stderr)
+        sys.exit(1)
+
+    # Create our OAuth access token
+    if opts.oauthAccessToken:
+        oaTok = oauth_token_from_query_string(opts.oauthAccessToken)
+    elif opts.oauthAccessTokenKey and \
+            opts.oauthAccessTokenSecret:
+        oaTok = oauth.OAuthToken(
+            opts.oauthAccessTokenKey,
+            opts.oauthAccessTokenSecret
+        )
+    else:
+        sys.stderr.write(
+            '\'%s\': access token options not specified\n' % (PROG_NAME)
+        )
+        op.print_usage(sys.stderr)
+        sys.exit(1)
+
+    # Make the call, overriding any OAuth parametsrs as specified
+    jc = JSON11Client(oaConsumer, oaTok)
+
+    oauthDefaults = {}
+    if opts.oauthNonce:
+        oauthDefaults['oauth_nonce'] = opts.oauthNonce
+    if opts.oauthTimestamp:
+        oauthDefaults['oauth_timestamp'] = opts.oauthTimestamp
+
     try:
-        import cascade_unittest_settings
-    except ImportError:
-        _generate_unittest_settings()
+        result = jc.call(
+            methodName, 
+            params = methodParams,
+            id = opts.id,
+            oauthDefaults = oauthDefaults
+        )
+    except CascadeHTTPError, e:
+        sys.stderr.write('\'%s\': call failed %s\n' % (PROG_NAME, str(e)))
+        sys.exit(1)
 
-        try:
-            import cascade_unittest_settings
-        except ImportError:
-            print sys.stderr, '>>> unable to configure settings; exiting'
-            sys.exit(1)
+    # Display the result on stdout
+    print simplejson.dumps(result)
 
-    unittest.main()
+def cmd_unittest(argv):
+    '''Run unit tests.'''
+
+    op = OptionParser(
+        usage = '''%prog unittest [options]
+        
+Runs all available unit tests.'''
+    )
+    opts, args = op.parse_args(argv)
+
+    if len(args) != 0:
+        op.print_usage(sys.stderr)
+        sys.exit(1)
+
+    runner = unittest.TextTestRunner()
+    runner.run(unittest.makeSuite(OAuthTest, 'test'))
+    runner.run(unittest.makeSuite(JSON11ClientTest, 'test'))
+
+CMD_TAB = {
+    'call' : cmd_call,
+    'unittest' : cmd_unittest
+}
+
+if __name__ == '__main__':
+    op = OptionParser(
+        usage = '''%prog [options] <subcommand> [<subcommand-options>] [<subcommand arg1> ...]
+
+The %prog command is a commandline driver for Cascade. It can be invoked with a
+number of different subcommands as described below. Global options should be
+specified before the subcommand, each of which can accept its own set of
+options and positional arguments.
+
+Possible subcommands are:
+
+    call           make a single Cascade call
+    unittest       run unittests
+
+Help on these subcommands can be retrieved by invoking the subcommand with the
+-h option (e.g. %prog call -h).'''
+    )
+    op.add_option(
+        '-v', action = 'count', dest = 'verbosity', default = 0,
+        help = '''increase logging verbosity; this option can be used multiple
+times to increase verbosity even more (default: %default)'''
+    )
+    op.allow_interspersed_args = False
+
+    # Parse arguments, processing global options
+    globalOpts, globalArgs = op.parse_args()
+
+    PROG_NAME = op.get_prog_name()
+
+    if len(globalArgs) < 1:
+        op.print_usage(sys.stderr)
+        sys.exit(1)
+
+    if not globalArgs[0] in CMD_TAB:
+        sys.stderr.write(
+            '%s: no such command \'%s\'\n' % (PROG_NAME, globalArgs[0])
+        )
+        op.print_usage(sys.stderr)
+        sys.exit(1)
+
+    # Set up logging
+    logHandler = logging.StreamHandler(sys.stderr)
+    logHandler.setFormatter(logging.Formatter('%(message)s'))
+    logging.getLogger().addHandler(logHandler)
+    logging.getLogger().setLevel(logging.ERROR - globalOpts.verbosity * 10)
+
+    # Dispatch our command
+    CMD_TAB[globalArgs[0]](globalArgs[1:])

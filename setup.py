@@ -8,6 +8,7 @@ setup(
     maintainer = 'Peter Griess',
     maintainer_email = 'pgriess@gmail.com',
     url = 'http://github.com/pgriess/PyCascade',
+    download_url = 'http://github.com/downloads/pgriess/PyCascade/PyCascade-1.0.tar.gz',
     description = 'A Python client for Cascade, the Yahoo! Mail API',
     long_description = 'A Python implementation of a `Cascade <http://developer.yahoo.com/mail/>`_ client; uses `OAuth <http://developer.yahoo.com/oauth/>`_ for authorization.',
     classifiers = [

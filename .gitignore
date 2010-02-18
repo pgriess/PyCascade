@@ -1,4 +1,5 @@
 README.html
 cascade_unittest_settings.py*
+*.pyc
 dist
 MANIFEST

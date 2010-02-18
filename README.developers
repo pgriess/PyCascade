@@ -1,0 +1,22 @@
+http://github.com/pgriess/PyCascade
+
+The above project page should be used to file bugs and is the official home of
+documentation.
+
+There is a bit of an involved process to get this thing up to PyPi.
+
+    1) Update the "version" and "download_url" parameters in in setup.py
+
+    2) Run "python setup.py sdist"
+
+    3) Upload the resulting tarball to GitHub
+
+    4) Run "python setup.py register"
+
+Doing this makes the package available to anyone via easy_install. At some
+point, we should purge old versions from the GitHub downloads area.
+
+TODO
+
+    - Prune down README.md and move some of its content into the GitHub wiki on
+      the project page.

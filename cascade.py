@@ -65,12 +65,13 @@ class JSON11Client:
     '''A Cascade client that converses over the JSON 1.1 API, authenticated
        by OAuth.'''
 
-    def __init__(self, oaConsumer, oaToken):
+    def __init__(self, oaConsumer, oaToken, authHeader = True):
         '''Instantiate a new client with the given OAuth parameters.'''
 
         self.__oaConsumer = oaConsumer
         self.__oaToken = oaToken
         self.__oaSig = oauth.OAuthSignatureMethod_HMAC_SHA1()
+        self.__sendAuthorizationHeader = authHeader
 
     def getToken(self):
         '''Get the OAuthToken for this client. A caller may wish to invoke
@@ -126,14 +127,19 @@ class JSON11Client:
             oaReq.sign_request(self.__oaSig, self.__oaConsumer, self.__oaToken)
 
             headers = { 'Content-Type' : 'application/json' }
-            headers.update(oaReq.to_header())
+            url = JSON11_ENDPOINT_URL
+
+            if self.__sendAuthorizationHeader:
+                headers.update(oaReq.to_header())
+            else:
+                url = oaReq.to_url()
 
             logging.debug('HTTP headers: ' + pprint.pformat(headers))
 
             cascadeResp = None
             try:
                 cascadeReq = urllib2.Request(
-                    url = JSON11_ENDPOINT_URL,
+                    url = url,
                     data = data,
                     headers = headers
                 )
@@ -506,8 +512,14 @@ Calls the Cascade method <method>. Parameters to the call should be passed on
 stdin as a JSON blob. The results of the call are written to stdout.'''
     )
     op.add_option(
-        '-i', '--id', dest = 'id', default = None,
-        help = '''id of the request; if unspecified, none will be sent'''
+        '-i', dest = 'input', default = None,
+        help = '''set the file from which to read input (default: stdin)'''
+    )
+    op.add_option(
+        '-u', '--url-params', dest = 'urlParams', action = 'store_true',
+        default = False,
+        help = '''send OAuth parameters as URL query parameters, rather than 
+using an Authorization header.'''
     )
     op.add_option(
         '-k', '--oauth-consumer-key', dest = 'oauthConsumerKey', default = None,
@@ -552,7 +564,13 @@ an access token, over --oauth-access-token-* (default: %default)'''
         sys.exit(1)
 
     methodName = args[0]
-    methodParams = simplejson.loads(''.join(sys.stdin.readlines()))
+
+    inputFile = sys.stdin
+    if opts.input:
+        inputFile = open(opts.input, 'r')
+    methodParams = simplejson.loads(''.join(inputFile.readlines()))
+    if opts.input:
+        inputFile.close()
 
     # Create our OAuth consumer
     if opts.oauthConsumerKey and \
@@ -585,7 +603,7 @@ an access token, over --oauth-access-token-* (default: %default)'''
         sys.exit(1)
 
     # Make the call, overriding any OAuth parametsrs as specified
-    jc = JSON11Client(oaConsumer, oaTok)
+    jc = JSON11Client(oaConsumer, oaTok, not opts.urlParams)
 
     oauthDefaults = {}
     if opts.oauthNonce:
@@ -597,7 +615,6 @@ an access token, over --oauth-access-token-* (default: %default)'''
         result = jc.call(
             methodName, 
             params = methodParams,
-            id = opts.id,
             oauthDefaults = oauthDefaults
         )
     except CascadeHTTPError, e:

@@ -14,6 +14,13 @@ import urlparse
 
 from optparse import OptionParser
 
+# Some oauth installations add an extra level of indirection; sniff this
+# out and fix it
+try:
+    oauth.OAuthConsumer('', '')
+except AttributeError:
+    import oauth.oauth as oauth
+
 ################################################################################
 # Constants 
 ################################################################################

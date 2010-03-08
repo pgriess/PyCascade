@@ -157,12 +157,7 @@ class JSON11Client:
                 # If we see something other than a 401 on our first attempt
                 # to make the call, give up. Otherwise, attempt to refresh
                 # our access token and try again.
-                #
-                # XXX: I can't get this to work with the Yahoo! OAuth
-                #      provider at this point. For some reason, the refresh
-                #      works but using the new token yields the same error
-                #      (999).
-                if attemptNo > 0 or e.code != 999:
+                if attemptNo > 0 or e.code != 401:
                     raise CascadeHTTPError(e)
 
                 logging.info('Refreshing OAuth access token ' + self.__oaToken.key)

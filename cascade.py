@@ -107,7 +107,6 @@ class JSON11Client:
             'oauth_nonce' : oauth.generate_nonce(),
             'oauth_timestamp' : oauth.generate_timestamp(),
             'oauth_consumer_key' : self.__oaConsumer.key,
-            'oauth_token' : self.__oaToken.key,
             'oauth_version' : '1.0'
         }
         oauthParameters.update(oauthDefaults)
@@ -123,6 +122,10 @@ class JSON11Client:
 
         for attemptNo in range(0, 2):
             logging.debug('Making request %d / 2' % (attemptNo + 1))
+
+            # Set the token every time through our loop, as we may have changed
+            # our token due to it being stale
+            oauthParameters['oauth_token'] = self.__oaToken.key
 
             # Construct and sign the request within our retry loop so that
             # we pick up any refresh of the access token
@@ -173,6 +176,8 @@ class JSON11Client:
                     self.__oaConsumer,
                     self.__oaToken
                 )
+
+                logging.info('New OAuth access token is ' + self.__oaToken.key)
             finally:
                 if cascadeResp:
                     cascadeResp.close()
